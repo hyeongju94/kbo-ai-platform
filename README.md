@@ -44,6 +44,30 @@ uv sync                     # Python 3.12 가상환경
 docker compose exec postgres psql -U kbo -d kbo -c '\dn'
 ```
 
+## 데이터 수집
+
+KBO 공식 기록실(koreabaseball.com)을 헤드리스 크롬(Selenium)으로 열어 시즌과 `KBO 정규시즌`을 고르고,
+페이지를 끝까지 넘기며 표를 읽어 PostgreSQL `raw` 스키마에 넣습니다. 필요한 것: Google Chrome.
+
+```bash
+uv run kbo-collect --season 2026 --type hitter    # 타자 기본기록 → raw.hitter_basic
+uv run kbo-collect --season 2026 --type pitcher   # 투수 기본기록 → raw.pitcher_basic
+uv run kbo-collect --season 2026 --type all       # 둘 다
+```
+
+- 선수는 이름 대신 KBO `playerId`로 구분합니다 (동명이인 구분).
+- 같은 시즌을 다시 수집하면 그 시즌 행을 지우고 새로 넣으므로 중복이 생기지 않습니다.
+- 기본 정렬(타율·평균자책점)은 규정타석/이닝 선수만 보여 주므로 경기수로 정렬해 전체 선수를 받습니다.
+- 원본 HTML은 `data/raw/kbo/` 에 백업됩니다 (git 제외).
+
+| 모듈 | 역할 |
+|---|---|
+| `ingestion/browser.py` | 헤드리스 크롬 실행 |
+| `ingestion/scrapers/record_table.py` | 시즌·시리즈 선택, 정렬, 페이지 넘기기 |
+| `ingestion/parsers.py` | HTML 표 → DataFrame, playerId 추출 |
+| `ingestion/loader.py` | DataFrame → PostgreSQL (트랜잭션으로 교체) |
+| `ingestion/cli.py` | `kbo-collect` 명령 |
+
 ## 기술 스택
 
 Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · Docker
@@ -51,7 +75,8 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
 ## 진행 상황
 
 - [x] 프로젝트 뼈대, PostgreSQL docker compose
-- [ ] 데이터 수집
+- [x] 데이터 수집: 타자·투수 기본기록 (Selenium)
+- [ ] 데이터 수집: 세부기록, requests 전환
 - [ ] 모델 학습과 MLflow
 - [ ] FastAPI 서빙
 - [ ] Airflow 파이프라인
