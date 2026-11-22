@@ -1,4 +1,4 @@
-"""KBO 기록실 표(타자/투수 기본기록 등)를 시즌·시리즈별로 전부 넘기며 HTML을 모은다."""
+"""KBO 기록실 표(선수·팀 기록, 팀 순위)를 시즌·시리즈별로 전부 넘기며 HTML을 모은다."""
 
 import logging
 import time
@@ -15,14 +15,20 @@ log = logging.getLogger(__name__)
 BASE_URL = "https://www.koreabaseball.com"
 
 # 드롭다운 id 끝부분 (전체 id는 cphContents_..._ddlSeason_ddlSeason 처럼 길다)
-SEASON_SELECT = "select[id$='ddlSeason_ddlSeason']"
-SERIES_SELECT = "select[id$='ddlSeries_ddlSeries']"
-TABLE = "table.tData01"
+# 선수 기록은 ddlSeason, 팀 순위는 ddlYear 라는 이름을 쓴다
+SEASON_SELECT = "select[id$='ddlSeason'], select[id$='ddlYear']"
+SERIES_SELECT = "select[id$='ddlSeries']"
+# 선수 기록 표는 tData01, 팀 기록·순위 표는 tData. 첫 번째 표가 본 기록이다.
+TABLE = "table.tData01, table.tData"
 PAGER_LINK = "div.paging a[id*='ucPager_btnNo']"
 PAGER_NEXT = "div.paging a[id$='ucPager_btnNext']"
 
 # 시리즈 코드: 기록실 기본값이 '한국시리즈'일 때가 있으므로 꼭 직접 고른다
 SERIES_REGULAR = "0"
+
+
+class SeasonNotAvailable(Exception):
+    """이 화면의 드롭다운에 해당 시즌(또는 시리즈)이 없다. 예: 팀 수비기록은 2001년부터."""
 
 
 @dataclass
@@ -44,6 +50,8 @@ def _select(driver: WebDriver, css: str, value: str, delay: float) -> None:
     select = Select(driver.find_element(By.CSS_SELECTOR, css))
     if select.first_selected_option.get_attribute("value") == value:
         return
+    if value not in {o.get_attribute("value") for o in select.options}:
+        raise SeasonNotAvailable(f"드롭다운에 '{value}' 값이 없습니다")
     table = driver.find_element(By.CSS_SELECTOR, TABLE)
     select.select_by_value(value)
     _wait_reload(driver, table)
@@ -60,7 +68,7 @@ def _sort(driver: WebDriver, col: str, delay: float) -> None:
     if current == col:
         return
     table = driver.find_element(By.CSS_SELECTOR, TABLE)
-    driver.find_element(By.CSS_SELECTOR, f"{TABLE} thead a[href*=\"sort('{col}')\"]").click()
+    table.find_element(By.CSS_SELECTOR, f"thead a[href*=\"sort('{col}')\"]").click()
     _wait_reload(driver, table)
     time.sleep(delay)
 
@@ -97,16 +105,26 @@ def scrape_record_pages(
     season: int,
     series: str = SERIES_REGULAR,
     sort_col: str | None = None,
+    entry_path: str | None = None,
     delay: float = 1.5,
     max_pages: int = 50,
 ) -> list[RecordPage]:
     """기록실 한 화면(path)에서 시즌·시리즈를 고르고 모든 페이지의 HTML을 돌려준다."""
-    driver.get(BASE_URL + path)
+    driver.get(BASE_URL + (entry_path or path))
     WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, TABLE)))
     time.sleep(delay)
 
     _select(driver, SEASON_SELECT, str(season), delay)
     _select(driver, SERIES_SELECT, series, delay)
+
+    if entry_path:
+        # 시즌 선택은 서버 세션에 남아 있으므로 '다음' 버튼으로 목표 화면에 들어간다
+        table = driver.find_element(By.CSS_SELECTOR, TABLE)
+        driver.find_element(By.CSS_SELECTOR, f".more_record a[href$='{path}']").click()
+        _wait_reload(driver, table)
+        time.sleep(delay)
+        if not driver.current_url.split("?")[0].endswith(path):
+            raise RuntimeError(f"{path} 로 이동하지 못했습니다: {driver.current_url}")
     if sort_col:
         _sort(driver, sort_col, delay)
 

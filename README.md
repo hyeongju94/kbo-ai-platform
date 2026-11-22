@@ -53,11 +53,14 @@ KBO 공식 기록실(koreabaseball.com)을 헤드리스 크롬(Selenium)으로 �
 uv run kbo-collect --season 2026 --type hitter    # 타자 기본기록 → raw.hitter_basic
 uv run kbo-collect --season 2026 --type pitcher   # 투수 기본기록 → raw.pitcher_basic
 uv run kbo-collect --season 2026 --type all       # 둘 다
+uv run kbo-collect --season 2000-2025 --type all  # 여러 시즌 (2019,2021 처럼 쉼표도 가능)
 ```
 
 - 선수는 이름 대신 KBO `playerId`로 구분합니다 (동명이인 구분).
 - 같은 시즌을 다시 수집하면 그 시즌 행을 지우고 새로 넣으므로 중복이 생기지 않습니다.
 - 기본 정렬(타율·평균자책점)은 규정타석/이닝 선수만 보여 주므로 경기수로 정렬해 전체 선수를 받습니다.
+- 시즌마다 항목이 다르면 테이블에 열을 추가하고, 없는 항목은 NULL로 둡니다. 팀명은 당시 이름 그대로(해태, 현대 등) 저장합니다.
+- 한 시즌이 실패해도 나머지는 계속 수집하고, 마지막에 시즌별 결과를 요약합니다.
 - 원본 HTML은 `data/raw/kbo/` 에 백업됩니다 (git 제외).
 
 | 모듈 | 역할 |

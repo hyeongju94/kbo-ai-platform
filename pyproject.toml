@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=3.1.1",
     "psycopg[binary]>=3.3.9",
     "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
     "selenium>=4.53.0",
     "sqlalchemy>=2.1.9",
 ]
@@ -19,6 +20,7 @@ dependencies = [
 [project.scripts]
 kbo-ai-platform = "kbo_ai_platform:main"
 kbo-collect = "kbo_ai_platform.ingestion.cli:main"
+kbo-views = "kbo_ai_platform.db.views:main"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]
