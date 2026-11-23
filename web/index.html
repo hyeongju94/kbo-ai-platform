@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KBO AI 에이전트</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+    --accent: #1f5fd1; --accent-soft: #e8effc; --warn: #8a5a00; --warn-soft: #fff6e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --panel: #1c2027; --text: #e6e9ef; --muted: #9aa3b5; --line: #2c323c;
+            --accent: #7aa7ff; --accent-soft: #1f2a40; --warn: #f0c36a; --warn-soft: #2d2618; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.6; }
+  header { max-width: 860px; margin: 0 auto; padding: 28px 20px 8px; display: flex; align-items: baseline; gap: 16px; }
+  header h1 { font-size: 20px; margin: 0; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  nav { margin-left: auto; display: flex; gap: 4px; }
+  nav button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 4px 12px;
+               border-radius: 999px; cursor: pointer; font-size: 13px; }
+  nav button.on { color: var(--accent); border-color: var(--accent); }
+  main { max-width: 860px; margin: 0 auto; padding: 8px 20px 140px; }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
+  .examples button { background: var(--panel); border: 1px solid var(--line); color: var(--text);
+                     padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+  .examples button:hover { border-color: var(--accent); }
+  .msg { margin: 16px 0; }
+  .q { background: var(--accent-soft); padding: 10px 14px; border-radius: 12px; display: inline-block; max-width: 85%; }
+  .msg.user { text-align: right; }
+  .a { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .a .body p:first-child { margin-top: 0; } .a .body p:last-child { margin-bottom: 0; }
+  .caveats { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 12px;
+             font-size: 13px; margin-top: 10px; }
+  .caveats ul { margin: 0; padding-left: 18px; }
+  details { margin-top: 10px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto;
+        white-space: pre-wrap; font-size: 12.5px; }
+  .tablewrap { overflow-x: auto; max-height: 320px; }
+  table { border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: left; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); }
+  .meta { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 12px; margin-top: 10px; flex-wrap: wrap; }
+  .meta .tag { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 8px; }
+  .meta button { background: none; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; padding: 1px 8px; color: var(--muted); }
+  .meta button.picked { border-color: var(--accent); color: var(--accent); }
+  form { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, var(--bg) 30%); padding: 24px 20px 20px; }
+  form .row { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; }
+  input { flex: 1; font: inherit; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+          background: var(--panel); color: var(--text); }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  form button { font: inherit; padding: 0 20px; border-radius: 12px; border: none; background: var(--accent); color: #fff; cursor: pointer; }
+  form button:disabled { opacity: .5; cursor: default; }
+  .thinking { color: var(--muted); font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card .k { color: var(--muted); font-size: 12px; } .card .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #monitor h3 { font-size: 15px; margin: 24px 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚾ KBO AI 에이전트</h1>
+  <p>2000~2026 KBO 기록을 조회해 근거와 함께 답해요</p>
+  <nav><button id="tabChat" class="on">질문</button><button id="tabMon">모니터링</button></nav>
+</header>
+
+<main id="chat">
+  <div class="examples" id="examples"></div>
+  <div id="log"></div>
+</main>
+
+<main id="monitor" hidden>
+  <div class="cards" id="cards"></div>
+  <h3>질문 분류</h3><div id="cats" class="tablewrap"></div>
+  <h3>최근 오류</h3><div id="errs" class="tablewrap"></div>
+</main>
+
+<form id="f">
+  <div class="row">
+    <input id="q" placeholder="예: 2026 시즌 OPS 상위 5명은?" autocomplete="off" maxlength="500">
+    <button id="send">질문</button>
+  </div>
+</form>
+
+<script>
+const EXAMPLES = [
+  "2026 시즌 홈런 1위는 누구야?",
+  "2025 시즌 규정이닝 투수 중 FIP 가 가장 낮은 5명",
+  "2026 시즌 팀 순위와 피타고라스 기대승률을 비교해 줘",
+  "역대 FA 계약 총액 상위 5건",
+  "FIP 가 뭐야?",
+];
+const $ = (id) => document.getElementById(id);
+const history = [];
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const md = (s) => DOMPurify.sanitize(marked.parse(s || ""));
+const CAT = { stats: "데이터 조회", prediction: "예측", general: "일반 지식", clarify: "되묻기", out_of_scope: "범위 밖", error: "오류", refused: "거절" };
+
+function table(columns, rows) {
+  if (!rows.length) return "<p>(결과 0행)</p>";
+  return `<div class="tablewrap"><table><thead><tr>${columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+
+function addUser(text) {
+  $("log").insertAdjacentHTML("beforeend", `<div class="msg user"><span class="q">${esc(text)}</span></div>`);
+}
+
+function addAnswer(out) {
+  const ev = out.evidence;
+  const m = out.metrics || {};
+  const el = document.createElement("div");
+  el.className = "msg";
+  el.innerHTML = `<div class="a">
+    <div class="body">${md(out.answer)}</div>
+    ${out.caveats?.length ? `<div class="caveats"><ul>${out.caveats.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>` : ""}
+    ${ev ? `<details><summary>근거 보기 · SQL 과 조회 결과 ${ev.row_count}행</summary>
+        <p>${esc(ev.plan)}</p><pre>${esc(ev.sql)}</pre>${table(ev.columns, ev.rows)}</details>` : ""}
+    <div class="meta">
+      <span class="tag">${esc(CAT[out.category] || out.category)}</span>
+      <span>${((m.latency_ms || 0) / 1000).toFixed(1)}초</span>
+      <span>토큰 ${(m.input_tokens || 0).toLocaleString()} / ${(m.output_tokens || 0).toLocaleString()}</span>
+      ${out.sql_attempts > 1 ? `<span>SQL ${out.sql_attempts}번 시도</span>` : ""}
+      <span style="margin-left:auto"></span>
+      <button data-s="1" title="좋아요">👍</button><button data-s="-1" title="아쉬워요">👎</button>
+    </div></div>`;
+  el.querySelectorAll("button[data-s]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      await fetch("/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: out.run_id, score: Number(b.dataset.s) }) });
+      el.querySelectorAll("button[data-s]").forEach((x) => x.classList.toggle("picked", x === b));
+    }));
+  $("log").appendChild(el);
+}
+
+async function ask(question) {
+  addUser(question);
+  const wait = document.createElement("div");
+  wait.className = "msg thinking";
+  wait.textContent = "질문을 분석하고 기록을 조회하는 중…";
+  $("log").appendChild(wait);
+  $("send").disabled = true;
+  wait.scrollIntoView({ behavior: "smooth" });
+  try {
+    const res = await fetch("/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history: history.slice(-3) }) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const out = await res.json();
+    wait.remove();
+    addAnswer(out);
+    history.push({ question, answer: out.answer });
+  } catch (e) {
+    wait.textContent = `요청 실패: ${e.message}`;
+  } finally {
+    $("send").disabled = false;
+  }
+}
+
+$("f").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const q = $("q").value.trim();
+  if (!q) return;
+  $("q").value = "";
+  ask(q);
+});
+EXAMPLES.forEach((t) => {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = t;
+  b.onclick = () => ask(t);
+  $("examples").appendChild(b);
+});
+
+async function loadMonitor() {
+  const s = await (await fetch("/monitoring?days=7")).json();
+  const pct = (v) => (v == null ? "-" : `${(v * 100).toFixed(1)}%`);
+  const sec = (v) => (v == null ? "-" : `${(v / 1000).toFixed(1)}초`);
+  const cards = [
+    ["최근 7일 질문", s.runs], ["오류율", pct(s.error_rate)], ["응답시간 중앙값", sec(s.p50_ms)],
+    ["응답시간 p95", sec(s.p95_ms)], ["평균 입력 토큰", s.avg_input_tokens ?? "-"], ["평균 출력 토큰", s.avg_output_tokens ?? "-"],
+    ["평균 SQL 시도", s.avg_sql_attempts ?? "-"], ["👍 / 👎", `${s.thumbs_up} / ${s.thumbs_down}`],
+  ];
+  $("cards").innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("");
+  $("cats").innerHTML = table(["분류", "건수"], Object.entries(s.categories).map(([c, n]) => [CAT[c] || c, n]));
+  $("errs").innerHTML = table(["시각", "질문", "오류"], s.recent_errors.map((e) => [e.at.slice(0, 19).replace("T", " "), e.question, e.error]));
+}
+
+function show(tab) {
+  const chat = tab === "chat";
+  $("chat").hidden = !chat; $("f").hidden = !chat; $("monitor").hidden = chat;
+  $("tabChat").classList.toggle("on", chat); $("tabMon").classList.toggle("on", !chat);
+  if (!chat) loadMonitor();
+}
+$("tabChat").onclick = () => show("chat");
+$("tabMon").onclick = () => show("mon");
+</script>
+</body>
+</html>

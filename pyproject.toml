@@ -8,19 +8,28 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=2.12.0",
+    "fastapi>=0.165.0",
+    "langgraph>=1.2.24",
     "lxml>=6.1.3",
     "pandas>=3.1.1",
     "psycopg[binary]>=3.3.9",
+    "pydantic>=2.14.4",
     "python-dotenv>=1.2.4",
     "requests>=2.34.2",
     "selenium>=4.53.0",
     "sqlalchemy>=2.1.9",
+    "sqlglot>=30.33.0",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [project.scripts]
 kbo-ai-platform = "kbo_ai_platform:main"
 kbo-collect = "kbo_ai_platform.ingestion.cli:main"
 kbo-views = "kbo_ai_platform.db.views:main"
+kbo-agent-setup = "kbo_ai_platform.db.agent_setup:main"
+kbo-agent-api = "kbo_ai_platform.serving.api:main"
+kbo-agent-eval = "kbo_ai_platform.evaluation.run_eval:main"
 
 [build-system]
 requires = ["uv_build>=0.13.9,<0.14.0"]
@@ -28,5 +37,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.2.0",
 ]

@@ -71,6 +71,60 @@ uv run kbo-collect --season 2000-2025 --type all  # 여러 시즌 (2019,2021 처
 | `ingestion/loader.py` | DataFrame → PostgreSQL (트랜잭션으로 교체) |
 | `ingestion/cli.py` | `kbo-collect` 명령 |
 
+## LLM 에이전트 (LangGraph + Claude)
+
+자연어 질문을 받아 DB를 조회하고, **답변과 함께 근거(실행한 SQL과 결과 표)** 를 돌려주는 에이전트입니다.
+
+```
+질문 ─▶ 분류 ─┬─ 기록 조회 ─▶ SQL 생성 ─▶ 안전 검사·실행 ─┬─▶ 근거 포함 답변
+              │                 ▲                          │
+              │                 └─ 오류·0행이면 고쳐서 재시도 ┘ (최대 3번)
+              ├─ 예측 ───────▶ 예측 모델 도구 (모델 준비 전이라 '준비 중' 응답)
+              ├─ 일반 지식 ──▶ 용어·규칙 설명 (DB 없이)
+              └─ 되묻기 / 범위 밖
+```
+
+| 파일 | 역할 |
+|---|---|
+| `agent/graph.py` | LangGraph 상태 그래프 (분류 → SQL 생성 → 실행·재시도 → 답변) |
+| `agent/prompts.py` | 노드별 프롬프트와 구조화 출력(Pydantic) 형식 |
+| `agent/schema_doc.py` | LLM 에게 주는 DB 설명서. 열 목록은 DB에서 자동으로 읽고 사람이 쓴 설명을 붙임 |
+| `agent/tools.py` | `run_sql`(SQL 검사 + 읽기 전용 실행), `predict_player`(예측 API 자리) |
+| `agent/llm.py` | Claude API 호출 (구조화 출력, 프롬프트 캐싱, 토큰 집계) |
+| `agent/run_log.py` | 실행 기록 저장(`ops.agent_runs`)과 모니터링 요약 |
+| `serving/api.py` | FastAPI: `/ask`, `/feedback`, `/monitoring`, `/health`, 웹페이지 |
+| `evaluation/run_eval.py` | 평가 세트 채점 |
+| `web/index.html` | 질문·근거 보기·👍👎·모니터링 탭이 있는 웹페이지 |
+
+**안전장치 (LLM 이 만든 SQL을 그대로 믿지 않음)**
+1. `sqlglot` 으로 SQL을 파싱해 SELECT 한 문장만, 허용된 테이블만 통과시키고 LIMIT 200을 강제합니다.
+2. 실제 실행은 SELECT 권한만 있는 `kbo_agent` 계정 + 읽기 전용 트랜잭션 + 10초 제한으로 합니다.
+3. 실행 기록 테이블(`ops`)은 에이전트 계정이 읽을 수도 없습니다.
+
+**실행**
+
+```bash
+# .env 에 ANTHROPIC_API_KEY 를 넣은 뒤
+uv run kbo-agent-setup     # 읽기 전용 DB 계정 + 로그 테이블 (한 번만)
+uv run kbo-agent-api       # http://localhost:8000  (API 문서: /docs)
+uv run kbo-agent-eval      # 평가 세트 실행 → eval/results/
+```
+
+모델은 `.env` 의 `AGENT_MODEL`(기본 `claude-opus-5-5`)로 바꿀 수 있고,
+질문 분류만 싼 모델로 돌리려면 `AGENT_FAST_MODEL=claude-haiku-5-5` 를 넣습니다.
+
+**평가** (`eval/questions.jsonl`, 22문항: 기록 조회 17 · 일반 지식 2 · 예측 1 · 범위 밖 1 · 프롬프트 인젝션 1)
+
+| 지표 | 뜻 |
+|---|---|
+| 분류 정확도 | 질문 유형을 맞게 골랐는가 |
+| 실행 정확도 | 정답 SQL 결과가 에이전트 조회 결과에 모두 들어 있는가 |
+| 근거 일치율 | 답변 속 숫자가 조회 결과 표에 실제로 있는가 (지어낸 숫자 탐지) |
+| 안전성 | "테이블 삭제해" 같은 요청에도 DB가 그대로인가 |
+
+**모니터링**: 모든 질문의 분류·SQL·응답시간·토큰·오류·피드백이 `ops.agent_runs` 에 쌓이고,
+웹페이지 "모니터링" 탭(`GET /monitoring`)에서 최근 7일 오류율, 응답시간 p50/p95, 평균 토큰, 👍/👎 를 봅니다.
+
 ## 기술 스택
 
 Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · Docker
@@ -84,5 +138,5 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
 - [ ] 모델 학습과 MLflow
 - [ ] FastAPI 서빙
 - [ ] Airflow 파이프라인
-- [ ] LangGraph 에이전트
-- [ ] 웹페이지
+- [x] LangGraph 에이전트 (질문 분류, SQL 생성·검사·재시도, 근거 포함 답변, 평가, 모니터링)
+- [x] 웹페이지 (질문, 근거 보기, 피드백, 모니터링 탭)
