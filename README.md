@@ -79,7 +79,11 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
 
 - [x] 프로젝트 뼈대, PostgreSQL docker compose
 - [x] 데이터 수집: 타자·투수 기본기록 (Selenium)
-- [ ] 데이터 수집: 세부기록, requests 전환
+- [ ] 데이터 수집 이어서 하기 (2026-11-23 기준 상태)
+  - 끝남: 타자·투수 기본기록 2000~2026 / 추가기록·주루·팀 기록 2020~2026, 2000~2001 / 수비 2001, 2021~2024, 2026
+  - 남음: `uv run kbo-collect --season 2002-2019 --type hitter_extra,pitcher_extra,runner,defense,team`
+    → `uv run kbo-collect --type profile` → `uv run kbo-views`
+  - 고칠 것: 수비 2020·2025년은 시즌 중 이적 선수가 같은 포지션으로 두 줄 나와 실패 (키에 팀 추가 필요)
 - [ ] 모델 학습과 MLflow
 - [ ] FastAPI 서빙
 - [ ] Airflow 파이프라인
