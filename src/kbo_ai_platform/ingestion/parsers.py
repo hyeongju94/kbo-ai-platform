@@ -130,6 +130,11 @@ def parse_pages(
     if not frames:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True)
+    # 페이지마다 열 형식 추측이 다를 수 있다(이닝 '6'은 숫자, '6 1/3'은 글자). 합친 뒤 한 번에 다시 맞춘다.
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].map(lambda v: v if pd.isna(v) else str(v))
+    df = _clean_values(df)
     # 같은 경기수끼리는 순서가 매번 달라서, 페이지 경계에서 같은 줄이 두 번 나오고 다른 줄이 빠질 수 있다.
     # 완전히 같은 줄은 하나만 남기고, 몇 줄 지웠는지 attrs에 적어 둔다(수집기가 보고 한 번 더 받는다).
     before = len(df)
