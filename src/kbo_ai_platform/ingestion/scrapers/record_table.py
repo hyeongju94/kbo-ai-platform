@@ -58,19 +58,23 @@ def _select(driver: WebDriver, css: str, value: str, delay: float) -> None:
     time.sleep(delay)
 
 
-def _sort(driver: WebDriver, col: str, delay: float) -> None:
+def _sort(driver: WebDriver, col: str, delay: float, ascending: bool = False) -> None:
     """표 머리글 정렬(페이지 안의 JS sort 함수)을 호출한다.
 
     기본 정렬(타율, 평균자책점)은 규정타석/규정이닝을 채운 선수만 보여 주기 때문에,
     경기수 같은 다른 열로 정렬해서 전체 선수를 받는다.
+    같은 머리글을 한 번 더 누르면 내림차순 ↔ 오름차순이 바뀐다.
     """
-    current = driver.find_element(By.CSS_SELECTOR, "input[id$='hfOrderByCol']").get_attribute("value")
-    if current == col:
-        return
-    table = driver.find_element(By.CSS_SELECTOR, TABLE)
-    table.find_element(By.CSS_SELECTOR, f"thead a[href*=\"sort('{col}')\"]").click()
-    _wait_reload(driver, table)
-    time.sleep(delay)
+    for _ in range(3):
+        current = driver.find_element(By.CSS_SELECTOR, "input[id$='hfOrderByCol']").get_attribute("value")
+        order = driver.find_element(By.CSS_SELECTOR, "input[id$='hfOrderBy']").get_attribute("value")
+        if current == col and ("DESC" not in order) == ascending:
+            return
+        table = driver.find_element(By.CSS_SELECTOR, TABLE)
+        table.find_element(By.CSS_SELECTOR, f"thead a[href*=\"sort('{col}')\"]").click()
+        _wait_reload(driver, table)
+        time.sleep(delay)
+    raise RuntimeError(f"{col} 정렬에 실패했습니다")
 
 
 def _current_page_no(driver: WebDriver) -> int:
@@ -106,6 +110,7 @@ def scrape_record_pages(
     series: str = SERIES_REGULAR,
     sort_col: str | None = None,
     entry_path: str | None = None,
+    ascending: bool = False,
     delay: float = 1.5,
     max_pages: int = 50,
 ) -> list[RecordPage]:
@@ -126,7 +131,7 @@ def scrape_record_pages(
         if not driver.current_url.split("?")[0].endswith(path):
             raise RuntimeError(f"{path} 로 이동하지 못했습니다: {driver.current_url}")
     if sort_col:
-        _sort(driver, sort_col, delay)
+        _sort(driver, sort_col, delay, ascending)
 
     # 선택이 제대로 됐는지 다시 확인 (조용히 다른 시즌을 긁는 일을 막는다)
     got_season = Select(driver.find_element(By.CSS_SELECTOR, SEASON_SELECT)).first_selected_option

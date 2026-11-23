@@ -130,6 +130,12 @@ def parse_pages(
     if not frames:
         return pd.DataFrame()
     df = pd.concat(frames, ignore_index=True)
+    # 같은 경기수끼리는 순서가 매번 달라서, 페이지 경계에서 같은 줄이 두 번 나오고 다른 줄이 빠질 수 있다.
+    # 완전히 같은 줄은 하나만 남기고, 몇 줄 지웠는지 attrs에 적어 둔다(수집기가 보고 한 번 더 받는다).
+    before = len(df)
+    # 순위(rank)는 정렬 방향에 따라 달라지므로 비교에서 뺀다
+    df = df.drop_duplicates(subset=[c for c in df.columns if c != "rank"], ignore_index=True)
+    df.attrs["dropped_duplicates"] = before - len(df)
     dup = df[df.duplicated(list(key_cols), keep=False)]
     if not dup.empty:
         raise ValueError(f"중복 키 {key_cols} 발견:\n{dup.head(10)}")

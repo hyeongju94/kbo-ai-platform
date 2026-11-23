@@ -59,14 +59,24 @@ def _backup(pages, record_type: str, season: int, series: str) -> Path:
 
 def collect(driver, record_type: str, season: int, series: str, delay: float) -> int:
     spec = RECORD_SPECS[record_type]
-    pages = scrape_record_pages(
-        driver, spec.path, season, series=series, sort_col=spec.sort_col,
-        entry_path=spec.entry_path, delay=delay
-    )
-    backup_dir = _backup(pages, record_type, season, series)
-    log.info("원본 HTML %d페이지 저장: %s", len(pages), backup_dir)
 
-    df = parse_pages([p.html for p in pages], spec.key_cols, spec.with_player_id)
+    def scrape(ascending: bool):
+        pages = scrape_record_pages(
+            driver, spec.path, season, series=series, sort_col=spec.sort_col,
+            entry_path=spec.entry_path, ascending=ascending, delay=delay,
+        )
+        backup_dir = _backup(pages, record_type, season, series)
+        log.info("원본 HTML %d페이지 저장: %s", len(pages), backup_dir)
+        return [p.html for p in pages]
+
+    html = scrape(ascending=False)
+    df = parse_pages(html, spec.key_cols, spec.with_player_id)
+    if df.attrs.get("dropped_duplicates") and spec.sort_col:
+        # 페이지 경계에서 줄이 겹쳤다 = 빠진 줄이 있을 수 있다. 반대 순서로 한 번 더 받아 합친다.
+        log.warning("%s %d: 페이지 사이 중복 %d줄 발견, 반대 정렬로 다시 받아 합칩니다",
+                    record_type, season, df.attrs["dropped_duplicates"])
+        html += scrape(ascending=True)
+        df = parse_pages(html, spec.key_cols, spec.with_player_id)
     if df.empty:  # 예: 2000년 팀 타격 기록은 사이트에 표만 있고 내용이 없다
         log.warning("%s %d: 사이트에 데이터가 없어 건너뜁니다", record_type, season)
         return 0

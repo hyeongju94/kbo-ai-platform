@@ -23,8 +23,14 @@ def test_parse_record_table_keeps_homonyms_apart():
     assert df["avg"].isna().iloc[1]  # '-' → NULL
 
 
-def test_parse_pages_rejects_duplicate_player():
+def test_parse_pages_drops_rows_repeated_across_pages():
+    df = parse_pages([PAGE, PAGE.replace("<td>1</td>", "<td>9</td>")])
+    assert len(df) == 2
+    assert df.attrs["dropped_duplicates"] == 2
+
+
+def test_parse_pages_rejects_conflicting_rows_for_same_player():
     import pytest
 
     with pytest.raises(ValueError):
-        parse_pages([PAGE, PAGE])
+        parse_pages([PAGE, PAGE.replace("<td>135</td>", "<td>136</td>")])
