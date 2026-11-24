@@ -12,6 +12,7 @@
 
 import time
 import uuid
+from datetime import date
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -67,7 +68,10 @@ class KBOAgent:
 
     # ── 노드 ────────────────────────────────────────────────
     def classify(self, state: AgentState, usage: Usage) -> AgentState:
-        user = f"[이전 대화]\n{_history_text(state.get('history'))}\n\n[새 질문]\n{state['question']}"
+        user = (
+            f"[오늘] {date.today().isoformat()}\n\n"
+            f"[이전 대화]\n{_history_text(state.get('history'))}\n\n[새 질문]\n{state['question']}"
+        )
         c = self.llm.structured(
             prompts.CLASSIFY_SYSTEM, user, prompts.Classification, usage, fast=True, effort="low", max_tokens=2000
         )

@@ -22,9 +22,9 @@ TABLE_NOTES: dict[str, str] = {
         "bsv 블론세이브, np 투구수, tbf 상대타자수. 이닝은 ip(글자, 예: '147 1/3') 대신 ip_decimal(숫자) 또는 outs 를 쓴다."
     ),
     "analytics.team_season": (
-        "팀 시즌 순위·성적 (1행 = 팀 × 시즌). rank 순위, w 승, l 패, t 무, wpct 승률, gb 게임차, runs 득점, "
+        "팀 시즌 순위·성적 (1행 = 팀 × 시즌). regular_season_rank 정규시즌 순위(승률 순, 동률은 결정전·상대전적 반영, tiebreak_note 에 이유), final_rank 포스트시즌까지 반영한 최종 순위(한국시리즈 우승팀 = 1위), w 승, l 패, t 무, wpct 승률, gb 게임차, runs 득점, "
         "runs_allowed 실점, run_diff 득실차, pyth_wpct 피타고라스 기대승률(지수 2), pyth_wpct_183(지수 1.83), "
-        "pyth_wins 기대승수. 2000년은 드림·매직 양대리그라 table_no 1·2 로 순위표가 나뉜다(그 해 rank 는 리그 안 순위)."
+        "pyth_wins 기대승수. 2000년은 드림·매직 양대리그라 table_no 1·2 로 순위표가 나뉜다(그 해 순위는 리그 안 순위)."
     ),
     "analytics.league_pitching": "시즌별 리그 전체 투수 합계와 리그 ERA, FIP 상수.",
     "raw.defense_basic": (
@@ -48,7 +48,7 @@ TABLE_NOTES: dict[str, str] = {
     "raw.team_pitcher": "팀 투수 기록 (팀 × 시즌). era, whip 등. 2000년은 비어 있다.",
     "raw.team_defense": "팀 수비 기록 (팀 × 시즌).",
     "raw.team_runner": "팀 주루 기록 (팀 × 시즌).",
-    "raw.team_rank": "팀 순위표 원본. last10 최근10경기, streak 연속, home·away 홈/원정 성적(글자). 분석엔 analytics.team_season 이 더 편하다.",
+    "raw.team_rank": "팀 순위표 원본. rank 는 포스트시즌 반영 최종 순위(정규시즌 순위 아님). 순위 질문엔 analytics.team_season 을 쓴다. last10 최근10경기, streak 연속, home·away 홈/원정 성적(글자). 분석엔 analytics.team_season 이 더 편하다.",
 }
 
 GLOBAL_NOTES = """\
@@ -61,6 +61,8 @@ GLOBAL_NOTES = """\
 - 규정타석(팀 경기수 × 3.1)·규정이닝(팀 경기수 × 1.0) 정보는 따로 없다. "타율 1위" 같은 순위 질문은
   타자는 pa >= 경기수×3.1, 투수는 ip_decimal >= 경기수 로 거른다. 그 시즌 팀 경기수는 analytics.team_season 의 max(g) 로 구한다.
 - raw.team_hitter, raw.team_pitcher, raw.team_defense, raw.team_runner 에는 리그 전체 합계 행(team_name = '합계')이 섞여 있다. 팀 비교·순위엔 team_name <> '합계' 로 뺀다.
+- 팀 순위: '정규시즌 순위/1위' 는 regular_season_rank, '우승팀·최종 순위' 는 final_rank 를 쓴다.
+  그냥 '순위' 라고 물으면 regular_season_rank 로 정렬하고 final_rank 도 함께 보여 준다.
 - 비율 지표(avg, era 등)로 정렬할 땐 NULL 이 위로 오지 않게 NULLS LAST 를 쓴다.
 """
 

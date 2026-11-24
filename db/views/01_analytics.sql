@@ -72,19 +72,48 @@ LEFT JOIN analytics.league_pitching lg USING (season, series);
 
 -- 팀: 순위 + 득점·실점 + 피타고라스 승률
 -- 팀 타격/투수 기록이 사이트에 없는 해(2000년)는 선수 기록을 팀별로 더해 득점·실점을 채운다.
-CREATE OR REPLACE VIEW analytics.team_season AS
-WITH player_runs AS (
+--
+-- 순위는 두 가지를 둔다.
+--   final_rank          : KBO 기록실 순위 = 포스트시즌까지 반영한 최종 순위 (한국시리즈 우승팀이 1위)
+--   regular_season_rank : 정규시즌 순위. 승률(wpct) 순서로 다시 계산한다.
+--     승률이 같으면 KBO 규정대로 1위·5위는 타이브레이커 경기, 그 밖은 상대전적으로 정하는데,
+--     그 결과는 DB에 없으므로 아래 tiebreak 목록에 손으로 적어 둔다. 목록에 없는 동률은 공동 순위.
+-- 열 이름이 바뀌므로(rank → final_rank) CREATE OR REPLACE 대신 지우고 다시 만든다.
+DROP VIEW IF EXISTS analytics.team_season;
+CREATE VIEW analytics.team_season AS
+WITH tiebreak(season, team_name, tiebreak_order, tiebreak_note) AS (
+    VALUES
+        (2019, '두산', 1, '두산·SK 승률 동률, 상대전적 우위로 두산 1위'),
+        (2019, 'SK',   2, '두산·SK 승률 동률, 상대전적 열세로 SK 2위'),
+        (2020, '두산', 1, '두산·LG 승률 동률, 상대전적 우위로 두산 3위'),
+        (2020, 'LG',   2, '두산·LG 승률 동률, 상대전적 열세로 LG 4위'),
+        (2021, 'KT',   1, 'KT·삼성 승률 동률, 1위 결정전 승리로 KT 1위'),
+        (2021, '삼성', 2, 'KT·삼성 승률 동률, 1위 결정전 패배로 삼성 2위'),
+        (2022, '키움', 1, '키움·KT 승률 동률, 상대전적 우위로 키움 3위'),
+        (2022, 'KT',   2, '키움·KT 승률 동률, 상대전적 열세로 KT 4위'),
+        (2024, 'KT',   1, 'KT·SSG 승률 동률, 5위 결정전 승리로 KT 5위'),
+        (2024, 'SSG',  2, 'KT·SSG 승률 동률, 5위 결정전 패배로 SSG 6위')
+), player_runs AS (
     SELECT season, series, team_name, sum(r) AS r FROM raw.hitter_basic GROUP BY 1, 2, 3
 ), player_runs_allowed AS (
     SELECT season, series, team_name, sum(r) AS ra FROM raw.pitcher_basic GROUP BY 1, 2, 3
 ), base AS (
     SELECT
-        tr.season, tr.series, tr.table_no, tr.rank, tr.team_name,
+        tr.season, tr.series, tr.table_no,
+        tr.rank AS final_rank,
+        -- 사이트 승률은 소수 셋째 자리로 반올림돼 있어 같으면 승/(승+패)로 한 번 더 비교한다 (예: 2018 KIA .4861 > 삼성 .4857)
+        rank() OVER (
+            PARTITION BY tr.season, tr.series, tr.table_no
+            ORDER BY tr.wpct DESC, tr.w::numeric / nullif(tr.w + tr.l, 0) DESC, tb.tiebreak_order NULLS LAST
+        ) AS regular_season_rank,
+        tb.tiebreak_note,
+        tr.team_name,
         tr.g, tr.w, tr.l, tr.t, tr.wpct, tr.gb,
         coalesce(th.r, pr.r) AS runs,
         coalesce(tp.r, pra.ra) AS runs_allowed,
         (th.r IS NULL) AS runs_from_players
     FROM raw.team_rank tr
+    LEFT JOIN tiebreak tb USING (season, team_name)
     LEFT JOIN raw.team_hitter th USING (season, series, team_name)
     LEFT JOIN raw.team_pitcher tp USING (season, series, team_name)
     LEFT JOIN player_runs pr USING (season, series, team_name)
