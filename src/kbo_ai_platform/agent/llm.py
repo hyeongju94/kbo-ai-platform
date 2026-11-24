@@ -4,8 +4,8 @@
 - 호출마다 토큰 사용량을 모아 두었다가 로그(ops.agent_runs)에 남긴다.
 - 설정은 .env 로 바꾼다:
     ANTHROPIC_API_KEY   (필수)
-    AGENT_MODEL         SQL 생성·답변용 모델 (기본 claude-opus-5-5)
-    AGENT_FAST_MODEL    질문 분류용 모델 (기본 AGENT_MODEL 과 같음. 비용을 줄이려면 claude-haiku-5-5)
+    AGENT_MODEL         SQL 생성·답변용 모델 (기본 claude-sonnet-5-5)
+    AGENT_FAST_MODEL    질문 분류용 모델 (기본 claude-haiku-5-5)
     AGENT_FALLBACKS     on/off. 안전 분류기가 거절하면 서버가 다른 모델로 다시 시도 (기본 on)
 """
 
@@ -21,7 +21,8 @@ from kbo_ai_platform.db.connection import PROJECT_ROOT
 
 T = TypeVar("T", bound=BaseModel)
 
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_FAST_MODEL = "claude-haiku-5-5"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
@@ -39,7 +40,12 @@ class Usage:
     def add(self, model: str, usage) -> None:
         self.calls += 1
         self.models.add(model)
-        self.input_tokens += (usage.input_tokens or 0) + (getattr(usage, "cache_read_input_tokens", 0) or 0)
+        # 캐시에 쓴/읽은 입력도 입력 토큰에 포함 (비용은 다르지만 양을 보려는 것)
+        self.input_tokens += (
+            (usage.input_tokens or 0)
+            + (getattr(usage, "cache_read_input_tokens", 0) or 0)
+            + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
+        )
         self.output_tokens += usage.output_tokens or 0
 
 
@@ -48,7 +54,7 @@ class ClaudeLLM:
         load_dotenv(PROJECT_ROOT / ".env")
         self.client = client or anthropic.Anthropic()
         self.model = os.getenv("AGENT_MODEL", DEFAULT_MODEL)
-        self.fast_model = os.getenv("AGENT_FAST_MODEL", self.model)
+        self.fast_model = os.getenv("AGENT_FAST_MODEL", DEFAULT_FAST_MODEL)
         self.fallbacks = os.getenv("AGENT_FALLBACKS", "on").lower() not in ("off", "0", "false")
 
     def structured(
