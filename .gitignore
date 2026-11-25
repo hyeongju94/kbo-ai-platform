@@ -13,6 +13,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.mlops.example
 
 # Local data and artifacts
 data/*

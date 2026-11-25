@@ -24,6 +24,8 @@ KBO 선수 데이터를 기반으로 한 MLOps 파이프라인과 LangGraph LLM 
 | `airflow/dags/` | 수집·학습 파이프라인 DAG |
 | `web/` | 에이전트와 대화하는 간단한 웹페이지 |
 | `db/init/` | Postgres 최초 실행 시 적용되는 SQL (`raw`, `analytics` 스키마) |
+| `db/mlops/` | MLflow 전용 DB·MinIO 버킷을 만드는 초기화 스크립트 |
+| `docker/` | MLflow·MinIO 컨테이너 이미지 (Dockerfile) |
 | `notebooks/` | 탐색적 분석 |
 | `data/` | 로컬 데이터 (git에 올리지 않음) |
 | `tests/` | 테스트 |
@@ -42,6 +44,67 @@ uv sync                     # Python 3.12 가상환경
 
 ```bash
 docker compose exec postgres psql -U kbo -d kbo -c '\dn'
+```
+
+## MLOps 인프라 (MLflow + MinIO)
+
+모델 학습 기록과 학습 데이터 스냅샷을 위한 컨테이너입니다. 학습 코드는 아직 없고 인프라만 있습니다.
+
+```
+학습 코드 (로컬) ──▶ MLflow 서버 :5001 ──┬─▶ PostgreSQL 의 mlflow DB   (실험·파라미터·지표·모델 레지스트리)
+                                        └─▶ MinIO 버킷 mlflow-artifacts (모델 파일 등 아티팩트)
+학습 코드 (로컬) ──▶ MinIO :9000 (S3 API) ──▶ 버킷 kbo-snapshots       (학습 데이터 스냅샷, 버전 관리 켜짐)
+```
+
+| 컨테이너 | 역할 | 주소 |
+|---|---|---|
+| `kbo-mlflow` | MLflow 3.18 추적 서버 + 웹 UI | http://localhost:5001 |
+| `kbo-minio` | S3 호환 저장소 | API http://localhost:9000 · 콘솔 http://localhost:9001 |
+| `kbo-minio-init` | 버킷 생성 후 종료 (1회성) | |
+| `kbo-mlflow-db-init` | 기존 Postgres 안에 `mlflow` 계정·DB 생성 후 종료 (1회성) | |
+
+- MLflow 메타데이터는 KBO 데이터와 같은 Postgres 컨테이너의 **별도 DB `mlflow`** (전용 계정 `mlflow`, 다른 계정은 접속 불가)에 들어갑니다. `kbo` DB 와 섞이지 않습니다.
+- MinIO 데이터는 `miniodata` 볼륨에 저장됩니다. 포트는 모두 `127.0.0.1` 에만 열립니다.
+- macOS 는 5000번 포트를 AirPlay 수신이 쓰므로 MLflow 는 **5001** 입니다.
+- MinIO 공식 Docker 이미지 배포가 중단되어(2025) Chainguard 가 소스에서 빌드한 `cgr.dev/chainguard/minio` 를 씁니다.
+- MLflow 의 GenAI 평가용 백그라운드 작업(`MLFLOW_SERVER_ENABLE_JOB_EXECUTION`)은 메모리를 2GB 가까이 써서 껐습니다. 일반 실험 추적·모델 레지스트리에는 영향이 없습니다.
+
+**실행**
+
+```bash
+cp .env.mlops.example .env.mlops   # 비밀번호 변경 (MinIO 비밀번호는 8자 이상)
+docker compose up -d mlflow        # minio → 버킷 생성 → mlflow DB 생성 → mlflow 순으로 뜸
+docker compose ps
+```
+
+> `docker compose up -d mlflow` 처럼 **서비스 이름을 붙여** 실행하세요. 이 서비스들은 postgres 에 `depends_on` 을 걸지 않아서
+> 실행 중인 Postgres 를 건드리지 않습니다. 이름 없이 `docker compose up -d` 를 하면 `.env` 가 Postgres 를 띄운 뒤에 바뀌었을 경우
+> (예: `kbo-agent-setup` 이 `AGENT_DB_PASSWORD` 추가) Postgres 컨테이너가 다시 만들어집니다(데이터는 볼륨에 남지만 잠시 끊김).
+
+**사용 예** (학습 코드 쪽; 패키지는 필요할 때 `uv add mlflow boto3`)
+
+```python
+import mlflow
+mlflow.set_tracking_uri("http://localhost:5001")   # 아티팩트도 서버를 거쳐 MinIO 로 감 → 클라이언트에 S3 키 불필요
+mlflow.set_experiment("my-experiment")
+with mlflow.start_run():
+    mlflow.log_param("alpha", 0.1)
+    mlflow.log_metric("rmse", 0.42)
+```
+
+```python
+import boto3, os   # 스냅샷 버킷은 S3 API 로 직접 (키는 .env.mlops 의 MINIO_ROOT_USER / MINIO_ROOT_PASSWORD)
+s3 = boto3.client("s3", endpoint_url="http://localhost:9000",
+                  aws_access_key_id=os.environ["MINIO_ROOT_USER"],
+                  aws_secret_access_key=os.environ["MINIO_ROOT_PASSWORD"])
+s3.upload_file("train.parquet", "kbo-snapshots", "2026-11-25/train.parquet")
+```
+
+**중지·정리**
+
+```bash
+docker compose stop mlflow minio             # 중지 (데이터 유지)
+docker compose rm -sf mlflow minio minio-init mlflow-db-init   # 컨테이너 삭제 (볼륨·DB는 유지)
 ```
 
 ## 데이터 수집
@@ -162,7 +225,8 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
   - 팀 순위는 두 가지: `analytics.team_season.final_rank` 는 기록실 순위(포스트시즌 반영, 우승팀 1위),
     `regular_season_rank` 는 승률로 다시 계산한 정규시즌 순위(승률 동률 5개 시즌은 결정전·상대전적 결과를 뷰에 적어 반영)
   - 사이트에 없는 것: 2000~2001 타자 2페이지(출루율 등), 2000년 팀 타격·투수 기록, 2000년 주루·수비
-- [ ] 모델 학습과 MLflow
+- [x] MLOps 인프라: MLflow 추적 서버 + MinIO (아티팩트·스냅샷 버킷) 컨테이너
+- [ ] 모델 학습과 MLflow 기록
 - [ ] FastAPI 서빙
 - [ ] Airflow 파이프라인
 - [x] LangGraph 에이전트 (질문 분류, SQL 생성·검사·재시도, 근거 포함 답변, 평가, 모니터링)

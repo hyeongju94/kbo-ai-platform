@@ -15,5 +15,84 @@ services:
       timeout: 5s
       retries: 10
 
+  # ---------- MLOps: MinIO (S3 호환 저장소) + MLflow 추적 서버 ----------
+  # 설정은 .env.mlops (cp .env.mlops.example .env.mlops). postgres 서비스 정의는 건드리지 않는다.
+
+  minio:
+    build: docker/minio
+    image: kbo-minio:local
+    container_name: kbo-minio
+    restart: unless-stopped
+    env_file: .env.mlops
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # 웹 콘솔
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "MC_HOST_local=http://$${MINIO_ROOT_USER}:$${MINIO_ROOT_PASSWORD}@localhost:9000 mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # 버킷을 만들고 종료하는 1회성 컨테이너
+  minio-init:
+    image: kbo-minio:local
+    container_name: kbo-minio-init
+    env_file: .env.mlops
+    entrypoint: ["sh", "/scripts/create_buckets.sh"]
+    volumes:
+      - ./db/mlops/create_buckets.sh:/scripts/create_buckets.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # 기존 Postgres 안에 MLflow 전용 계정·DB(mlflow)를 만들고 종료하는 1회성 컨테이너
+  mlflow-db-init:
+    image: postgres:16
+    container_name: kbo-mlflow-db-init
+    env_file: [.env, .env.mlops]
+    entrypoint: ["sh", "/scripts/create_mlflow_db.sh"]
+    volumes:
+      - ./db/mlops/create_mlflow_db.sh:/scripts/create_mlflow_db.sh:ro
+
+  mlflow:
+    build: docker/mlflow
+    image: kbo-mlflow:local
+    container_name: kbo-mlflow
+    restart: unless-stopped
+    env_file: .env.mlops
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      # GenAI 평가용 백그라운드 작업(huey 워커 ~2GB)을 끔. 일반 실험 추적·모델 레지스트리에는 필요 없음
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+    # 실행 기록 → Postgres 의 mlflow DB, 아티팩트 → MinIO 버킷 (클라이언트는 서버를 거쳐 올림)
+    command:
+      - sh
+      - -c
+      - >-
+        export AWS_ACCESS_KEY_ID="$$MINIO_ROOT_USER" AWS_SECRET_ACCESS_KEY="$$MINIO_ROOT_PASSWORD" &&
+        exec mlflow server
+        --host 0.0.0.0 --port 5000 --workers 2
+        --backend-store-uri "postgresql://$$MLFLOW_DB_USER:$$MLFLOW_DB_PASSWORD@postgres:5432/$$MLFLOW_DB_NAME"
+        --artifacts-destination "s3://$$MLFLOW_ARTIFACT_BUCKET"
+        --serve-artifacts
+        --allowed-hosts "localhost,localhost:5000,localhost:5001,127.0.0.1,127.0.0.1:5000,127.0.0.1:5001,mlflow,mlflow:5000"
+    ports:
+      - "127.0.0.1:5001:5000"   # macOS 는 5000 을 AirPlay 가 쓰므로 5001
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      mlflow-db-init:
+        condition: service_completed_successfully
+
 volumes:
   pgdata:
+  miniodata:
