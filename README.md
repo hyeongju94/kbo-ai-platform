@@ -263,6 +263,7 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
     `regular_season_rank` 는 승률로 다시 계산한 정규시즌 순위(승률 동률 5개 시즌은 결정전·상대전적 결과를 뷰에 적어 반영)
   - 사이트에 없는 것: 2000~2001 타자 2페이지(출루율 등), 2000년 팀 타격·투수 기록, 2000년 주루·수비
 - [x] MLOps 인프라: MLflow 추적 서버 + MinIO (아티팩트·스냅샷 버킷) + Airflow 3 (LocalExecutor) 컨테이너
+- [~] 데이터 수집: 선수 경기별 기록 2011~2026 정규시즌 완료 (2001~2010은 이어서 받을 예정)
 - [ ] 모델 학습과 MLflow 기록
 - [ ] FastAPI 서빙
 - [ ] Airflow 파이프라인 DAG
