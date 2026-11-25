@@ -70,6 +70,20 @@ uv run kbo-collect --season 2000-2025 --type all  # 여러 시즌 (2019,2021 처
 | `ingestion/parsers.py` | HTML 표 → DataFrame, playerId 추출 |
 | `ingestion/loader.py` | DataFrame → PostgreSQL (트랜잭션으로 교체) |
 | `ingestion/cli.py` | `kbo-collect` 명령 |
+| `ingestion/game_logs.py` | 선수 경기별(일자별) 기록 → `raw.hitter_game_log`, `raw.pitcher_game_log` |
+
+### 경기별 기록 (게임로그)
+
+```bash
+uv run python -m kbo_ai_platform.ingestion.game_logs --season 2001-2026 --type all
+```
+
+- 기록실 선수 '일자별 기록' 페이지를 requests로 받습니다 (GET 후 시즌·정규시즌 선택 POST 한 번).
+- 대상은 시즌 기본기록 테이블에 나온 선수이고, 최근 시즌부터 진행합니다.
+- 끝난 선수·시즌은 `raw.game_log_progress` 에 남겨 다시 실행하면 건너뜁니다 (중단돼도 이어서 받기). `--refresh` 로 다시 받기.
+- progress의 `n_games`(받은 경기 수)와 `expected_g`(기본기록 G)로 빠진 경기를 확인할 수 있습니다.
+- 같은 날 두 경기(더블헤더)는 `game_no` 1, 2로 구분합니다. 투수 이닝은 `ip_text`('5 2/3')와 `ip_outs`(17) 둘 다 저장합니다.
+- 사이트 시즌 선택이 2001년부터라 2000 시즌 경기별 기록은 없습니다. 원본 HTML은 `data/raw/kbo/game_log/` 에 gzip으로 백업됩니다.
 
 ## LLM 에이전트 (LangGraph + Claude)
 
