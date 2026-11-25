@@ -21,11 +21,11 @@ KBO 선수 데이터를 기반으로 한 MLOps 파이프라인과 LangGraph LLM 
 | `src/kbo_ai_platform/training/` | 모델 학습, MLflow 실험 추적 |
 | `src/kbo_ai_platform/serving/` | FastAPI 예측 API |
 | `src/kbo_ai_platform/agent/` | LangGraph 기반 LLM 에이전트 |
-| `airflow/dags/` | 수집·학습 파이프라인 DAG |
+| `airflow/dags/` | 수집·학습 파이프라인 DAG (`plugins/`, `logs/`, `config/` 도 컨테이너에 마운트) |
 | `web/` | 에이전트와 대화하는 간단한 웹페이지 |
 | `db/init/` | Postgres 최초 실행 시 적용되는 SQL (`raw`, `analytics` 스키마) |
-| `db/mlops/` | MLflow 전용 DB·MinIO 버킷을 만드는 초기화 스크립트 |
-| `docker/` | MLflow·MinIO 컨테이너 이미지 (Dockerfile) |
+| `db/mlops/` | MLflow·Airflow 전용 DB, MinIO 버킷을 만드는 초기화 스크립트 |
+| `docker/` | MLflow·MinIO·Airflow 컨테이너 이미지 (Dockerfile)와 Airflow 초기화 스크립트 |
 | `notebooks/` | 탐색적 분석 |
 | `data/` | 로컬 데이터 (git에 올리지 않음) |
 | `tests/` | 테스트 |
@@ -46,42 +46,78 @@ uv sync                     # Python 3.12 가상환경
 docker compose exec postgres psql -U kbo -d kbo -c '\dn'
 ```
 
-## MLOps 인프라 (MLflow + MinIO)
+## MLOps 인프라 (MLflow + MinIO + Airflow)
 
-모델 학습 기록과 학습 데이터 스냅샷을 위한 컨테이너입니다. 학습 코드는 아직 없고 인프라만 있습니다.
+모델 학습 기록, 학습 데이터 스냅샷, 파이프라인 스케줄링을 위한 컨테이너입니다. 학습 코드·DAG 는 아직 없고 인프라만 있습니다.
 
 ```
-학습 코드 (로컬) ──▶ MLflow 서버 :5001 ──┬─▶ PostgreSQL 의 mlflow DB   (실험·파라미터·지표·모델 레지스트리)
-                                        └─▶ MinIO 버킷 mlflow-artifacts (모델 파일 등 아티팩트)
-학습 코드 (로컬) ──▶ MinIO :9000 (S3 API) ──▶ 버킷 kbo-snapshots       (학습 데이터 스냅샷, 버전 관리 켜짐)
+학습 코드 / Airflow 태스크 ──▶ MLflow 서버 ──┬─▶ PostgreSQL 의 mlflow DB    (실험·파라미터·지표·모델 레지스트리)
+                                           └─▶ MinIO 버킷 mlflow-artifacts (모델 파일 등 아티팩트)
+학습 코드 / Airflow 태스크 ──▶ MinIO (S3 API) ──▶ 버킷 kbo-snapshots        (학습 데이터 스냅샷, 버전 관리 켜짐)
+Airflow (api-server · scheduler · dag-processor) ──▶ PostgreSQL 의 airflow DB (메타데이터)
 ```
 
-| 컨테이너 | 역할 | 주소 |
-|---|---|---|
-| `kbo-mlflow` | MLflow 3.18 추적 서버 + 웹 UI | http://localhost:5001 |
-| `kbo-minio` | S3 호환 저장소 | API http://localhost:9000 · 콘솔 http://localhost:9001 |
-| `kbo-minio-init` | 버킷 생성 후 종료 (1회성) | |
-| `kbo-mlflow-db-init` | 기존 Postgres 안에 `mlflow` 계정·DB 생성 후 종료 (1회성) | |
+| 컨테이너 | 역할 | 주소 | 메모리 제한 |
+|---|---|---|---|
+| `kbo-mlflow` | MLflow 3.18 추적 서버 + 웹 UI | http://localhost:5001 | 1GB |
+| `kbo-minio` | S3 호환 저장소 | API http://localhost:9000 · 콘솔 http://localhost:9001 | 512MB |
+| `kbo-airflow-apiserver` | Airflow 3.4 웹 UI + REST API (Airflow 3 에서 webserver 를 대체) | http://localhost:8080 | 1GB |
+| `kbo-airflow-scheduler` | 스케줄링 + LocalExecutor (태스크가 이 컨테이너 안에서 실행) | | 1.5GB |
+| `kbo-airflow-dag-processor` | `airflow/dags/` 의 DAG 파일을 읽어 등록 | | 768MB |
+| `kbo-minio-init` | 버킷 생성 후 종료 (1회성) | | |
+| `kbo-mlops-db-init` | 기존 Postgres 안에 `mlflow`·`airflow` 계정·DB 생성 후 종료 (1회성) | | |
+| `kbo-airflow-init` | Airflow 메타DB 마이그레이션, 관리자 비밀번호, Connections 등록 후 종료 (1회성) | | |
 
-- MLflow 메타데이터는 KBO 데이터와 같은 Postgres 컨테이너의 **별도 DB `mlflow`** (전용 계정 `mlflow`, 다른 계정은 접속 불가)에 들어갑니다. `kbo` DB 와 섞이지 않습니다.
-- MinIO 데이터는 `miniodata` 볼륨에 저장됩니다. 포트는 모두 `127.0.0.1` 에만 열립니다.
-- macOS 는 5000번 포트를 AirPlay 수신이 쓰므로 MLflow 는 **5001** 입니다.
+실제 사용량(유휴 상태)은 MLflow 약 600MB, Airflow 3개 합계 약 900MB, MinIO 약 100MB 입니다 (Docker 메모리 3.8GB 기준).
+
+**설계 메모**
+- MLflow·Airflow 메타데이터는 KBO 데이터와 같은 Postgres 컨테이너의 **별도 DB `mlflow`, `airflow`** (각각 전용 계정, 다른 계정은 접속 불가)에 들어갑니다. `kbo` DB 와 섞이지 않습니다.
+- 포트는 모두 `127.0.0.1` 에만 열립니다. macOS 는 5000번 포트를 AirPlay 수신이 쓰므로 MLflow 는 **5001** 입니다.
 - MinIO 공식 Docker 이미지 배포가 중단되어(2025) Chainguard 가 소스에서 빌드한 `cgr.dev/chainguard/minio` 를 씁니다.
 - MLflow 의 GenAI 평가용 백그라운드 작업(`MLFLOW_SERVER_ENABLE_JOB_EXECUTION`)은 메모리를 2GB 가까이 써서 껐습니다. 일반 실험 추적·모델 레지스트리에는 영향이 없습니다.
+- Airflow 는 LocalExecutor, 동시 태스크 4개(`AIRFLOW__CORE__PARALLELISM`), 예시 DAG 끔, 새 DAG 는 일시정지 상태로 등록됩니다.
+  triggerer(Deferrable 연산자용)는 메모리를 아끼려고 넣지 않았습니다.
+
+**Airflow 에 미리 등록된 것**
+
+| 종류 | 이름 | 내용 |
+|---|---|---|
+| Connection | `kbo_postgres` | KBO 데이터 DB (`PostgresHook(postgres_conn_id="kbo_postgres")`) |
+| Connection | `mlflow_http` | MLflow 서버 `http://mlflow:5000` (`HttpHook`) |
+| Connection | `minio_s3` | MinIO (`S3Hook(aws_conn_id="minio_s3")`, endpoint `http://minio:9000`) |
+| 환경변수 | `MLFLOW_TRACKING_URI` | `http://mlflow:5000` (태스크 안에서 `mlflow` 를 바로 쓰면 이 서버로 기록) |
+| 환경변수 | `MLFLOW_ARTIFACT_BUCKET`, `SNAPSHOT_BUCKET` | 버킷 이름 |
+| 패키지 | postgres·amazon·http 프로바이더, boto3, mlflow-skinny 3.18 | `docker/airflow/Dockerfile` |
+
+폴더 마운트: `airflow/dags`(DAG 파일), `airflow/plugins`, `airflow/logs`(태스크 로그, git 제외), `airflow/config`(생성된 로그인 비밀번호 파일, git 제외),
+`src/` → 컨테이너의 `/opt/airflow/project/src` (`PYTHONPATH` 에 포함, 읽기 전용).
+DAG 파일을 `airflow/dags/` 에 저장하면 30초 안팎으로 UI 에 나타납니다.
+`airflow/dags/infra_check.py` 는 세 연결(KBO DB, MLflow, MinIO)이 되는지만 보는 동작 확인용 예시입니다.
 
 **실행**
 
 ```bash
-cp .env.mlops.example .env.mlops   # 비밀번호 변경 (MinIO 비밀번호는 8자 이상)
-docker compose up -d mlflow        # minio → 버킷 생성 → mlflow DB 생성 → mlflow 순으로 뜸
+cp .env.mlops.example .env.mlops   # 비밀번호·키 채우기 (MinIO 비밀번호는 8자 이상, 키 만드는 명령은 파일 안에)
+docker compose up -d mlflow airflow-apiserver airflow-scheduler airflow-dag-processor
 docker compose ps
 ```
 
-> `docker compose up -d mlflow` 처럼 **서비스 이름을 붙여** 실행하세요. 이 서비스들은 postgres 에 `depends_on` 을 걸지 않아서
-> 실행 중인 Postgres 를 건드리지 않습니다. 이름 없이 `docker compose up -d` 를 하면 `.env` 가 Postgres 를 띄운 뒤에 바뀌었을 경우
+순서는 자동입니다: minio → 버킷 생성 / mlflow·airflow DB 생성 → mlflow, airflow-init → Airflow 3개.
+Airflow 로그인은 `admin` / `.env.mlops` 의 `AIRFLOW_ADMIN_PASSWORD` 입니다.
+
+> 꼭 **서비스 이름을 붙여** 실행하세요. MLOps 서비스들은 postgres 에 `depends_on` 을 걸지 않아서 실행 중인 Postgres 를 건드리지 않습니다.
+> 이름 없이 `docker compose up -d` 를 하면 `.env` 가 Postgres 를 띄운 뒤에 바뀌었을 경우
 > (예: `kbo-agent-setup` 이 `AGENT_DB_PASSWORD` 추가) Postgres 컨테이너가 다시 만들어집니다(데이터는 볼륨에 남지만 잠시 끊김).
 
-**사용 예** (학습 코드 쪽; 패키지는 필요할 때 `uv add mlflow boto3`)
+동작 확인 (예시 DAG 실행):
+
+```bash
+docker compose exec airflow-scheduler airflow dags unpause infra_check
+docker compose exec airflow-scheduler airflow dags trigger infra_check
+docker compose exec airflow-scheduler airflow dags list-runs infra_check   # state 가 success 면 정상
+```
+
+**사용 예** (로컬 학습 코드 쪽; 패키지는 필요할 때 `uv add mlflow boto3`)
 
 ```python
 import mlflow
@@ -103,8 +139,9 @@ s3.upload_file("train.parquet", "kbo-snapshots", "2026-11-25/train.parquet")
 **중지·정리**
 
 ```bash
-docker compose stop mlflow minio             # 중지 (데이터 유지)
-docker compose rm -sf mlflow minio minio-init mlflow-db-init   # 컨테이너 삭제 (볼륨·DB는 유지)
+docker compose stop airflow-apiserver airflow-scheduler airflow-dag-processor mlflow minio   # 중지 (데이터 유지)
+docker compose rm -sf airflow-apiserver airflow-scheduler airflow-dag-processor airflow-init \
+  mlflow minio minio-init mlops-db-init                                                    # 컨테이너 삭제 (볼륨·DB 유지)
 ```
 
 ## 데이터 수집
@@ -225,9 +262,9 @@ Python 3.12 · uv · PostgreSQL · Airflow · MLflow · FastAPI · LangGraph · 
   - 팀 순위는 두 가지: `analytics.team_season.final_rank` 는 기록실 순위(포스트시즌 반영, 우승팀 1위),
     `regular_season_rank` 는 승률로 다시 계산한 정규시즌 순위(승률 동률 5개 시즌은 결정전·상대전적 결과를 뷰에 적어 반영)
   - 사이트에 없는 것: 2000~2001 타자 2페이지(출루율 등), 2000년 팀 타격·투수 기록, 2000년 주루·수비
-- [x] MLOps 인프라: MLflow 추적 서버 + MinIO (아티팩트·스냅샷 버킷) 컨테이너
+- [x] MLOps 인프라: MLflow 추적 서버 + MinIO (아티팩트·스냅샷 버킷) + Airflow 3 (LocalExecutor) 컨테이너
 - [ ] 모델 학습과 MLflow 기록
 - [ ] FastAPI 서빙
-- [ ] Airflow 파이프라인
+- [ ] Airflow 파이프라인 DAG
 - [x] LangGraph 에이전트 (질문 분류, SQL 생성·검사·재시도, 근거 포함 답변, 평가, 모니터링)
 - [x] 웹페이지 (질문, 근거 보기, 피드백, 모니터링 탭)

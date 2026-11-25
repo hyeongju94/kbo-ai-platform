@@ -25,3 +25,9 @@ mlartifacts/
 .DS_Store
 .idea/
 .vscode/
+
+# Airflow runtime files (logs, generated passwords)
+airflow/logs/*
+!airflow/logs/.gitkeep
+airflow/config/*
+!airflow/config/.gitkeep
