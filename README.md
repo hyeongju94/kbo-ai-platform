@@ -171,6 +171,7 @@ uv run kbo-collect --season 2000-2025 --type all  # 여러 시즌 (2019,2021 처
 | `ingestion/loader.py` | DataFrame → PostgreSQL (트랜잭션으로 교체) |
 | `ingestion/cli.py` | `kbo-collect` 명령 |
 | `ingestion/game_logs.py` | 선수 경기별(일자별) 기록 → `raw.hitter_game_log`, `raw.pitcher_game_log` |
+| `ingestion/salaries.py` | KBO 보도자료·선수 정보 연봉 → `raw.player_salary`, `raw.team_salary` |
 
 ### 경기별 기록 (게임로그)
 
@@ -184,6 +185,19 @@ uv run python -m kbo_ai_platform.ingestion.game_logs --season 2001-2026 --type a
 - progress의 `n_games`(받은 경기 수)와 `expected_g`(기본기록 G)로 빠진 경기를 확인할 수 있습니다.
 - 같은 날 두 경기(더블헤더)는 `game_no` 1, 2로 구분합니다. 투수 이닝은 `ip_text`('5 2/3')와 `ip_outs`(17) 둘 다 저장합니다.
 - 사이트 시즌 선택이 2001년부터라 2000 시즌 경기별 기록은 없습니다. 원본 HTML은 `data/raw/kbo/game_log/` 에 gzip으로 백업됩니다.
+
+### 선수 연봉 (2000~2026)
+
+```bash
+uv run python -m kbo_ai_platform.ingestion.salaries            # 보도자료·첨부 받기(캐시) + 적재
+uv run python -m kbo_ai_platform.ingestion.salaries --offline  # 저장된 파일만 다시 파싱
+```
+
+- 출처는 KBO 공식 사이트뿐입니다: KBO 보도자료(매년 소속선수 등록·평균 연봉 발표, 12월 상위 40명 합계 발표)의 본문·첨부 표와, 선수 정보 페이지의 현재 연봉(`raw.player_profile`). 모든 행에 `source_type`·`source_table`·`source_url`·`source_file`이 남습니다.
+- `raw.player_salary`: 선수·시즌 연봉 (국내 만원, 외국인 달러). 2005~2021은 억대 연봉 전체 명단, 2000~2004는 억대 요약표(구단은 기록 테이블로 채움, `team_from_records`), 2014~2025는 구단별 상위 5걸·부문별·위치별·연차별 상위와 외국인선수 전원, 2026은 선수 정보 페이지 연봉(2026 기록이 있는 10개 구단 선수)까지 들어갑니다. 2022~2025는 KBO가 억대 전체 명단을 더 이상 첨부하지 않아 상위 선수·외국인만 있습니다.
+- `raw.team_salary`: 구단별 연봉 총액·평균. `basis` = `registered`(신인·외국인 제외 소속선수, 2013~2026), `top_entry`(1군 엔트리 기준 상위 27~29명, 2014~2026), `top40_cbt`(경쟁균형세 상위 40명 합계, 2023~2025). 구단 이름 '합계'는 리그 전체.
+- 한 선수가 여러 표에 나오면 우선순위가 높은 표(전체 명단 > 외국인 현황 > 구단별 상위 > …, 같은 시즌 발표 먼저) 값을 쓰고, 표마다 값이 다르면 `value_conflict`에 남깁니다. 같은 팀 동명이인은 원문 표기 `이병규(9)`처럼 등번호를 붙여 구분합니다.
+- 원본(보도자료 HTML·첨부)은 `data/raw/kbo_salary/` 에 저장됩니다 (git 제외). `.docx`·`.doc` 첨부는 macOS `textutil`로 HTML로 바꿔 표를 읽습니다.
 
 ## LLM 에이전트 (LangGraph + Claude)
 
